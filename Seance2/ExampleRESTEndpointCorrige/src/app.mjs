@@ -53,6 +53,17 @@ export const DATA_DIR = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.join(PUBLIC_DIR, "presets");
 
+// No decodeURIComponent needed anymore; these are file system paths
+
+
+// Defines where static files are located, for example the file 
+// data/presets/Basic Kit/kick.wav
+// will be accessible at http://localhost:3000/presets/Basic%20Kit/kick.wav
+// The file PUBLIC_DIR/index.html will be served at http://localhost:3000/ or 
+// http://localhost:3000/index.html
+// app.use should use a path that works on unix and windows
+app.use(express.static(PUBLIC_DIR));
+
 // Ensure data dir exists at startup (best-effort)
 await fs.mkdir(DATA_DIR, { recursive: true }).catch(() => {});
 
