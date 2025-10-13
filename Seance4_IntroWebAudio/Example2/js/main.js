@@ -10,88 +10,84 @@ import TrimbarsDrawer from './trimbarsdrawer.js';
 import { loadAndDecodeSound, playSound } from './soundutils.js';
 import { pixelToSeconds } from './utils.js';
 
-// The AudioContext object is the main "entry point" into the Web Audio API
-let ctx;
+let ctx = new AudioContext();
 
-const soundURL =
-    'https://mainline.i3s.unice.fr/mooc/shoot2.mp3';
-let decodedSound;
+const soundURLs = [
+  'https://upload.wikimedia.org/wikipedia/commons/a/a3/Hardstyle_kick.wav',
+  'https://upload.wikimedia.org/wikipedia/commons/transcoded/c/c7/Redoblante_de_marcha.ogg/Redoblante_de_marcha.ogg.mp3',
+  'https://upload.wikimedia.org/wikipedia/commons/transcoded/c/c9/Hi-Hat_Cerrado.ogg/Hi-Hat_Cerrado.ogg.mp3',
+  'https://upload.wikimedia.org/wikipedia/commons/transcoded/0/07/Hi-Hat_Abierto.ogg/Hi-Hat_Abierto.ogg.mp3',
+  'https://upload.wikimedia.org/wikipedia/commons/transcoded/3/3c/Tom_Agudo.ogg/Tom_Agudo.ogg.mp3',
+  'https://upload.wikimedia.org/wikipedia/commons/transcoded/a/a4/Tom_Medio.ogg/Tom_Medio.ogg.mp3',
+  'https://upload.wikimedia.org/wikipedia/commons/transcoded/8/8d/Tom_Grave.ogg/Tom_Grave.ogg.mp3',
+  'https://upload.wikimedia.org/wikipedia/commons/transcoded/6/68/Crash.ogg/Crash.ogg.mp3',
+  'https://upload.wikimedia.org/wikipedia/commons/transcoded/2/24/Ride.ogg/Ride.ogg.mp3'
+];
 
 let canvas, canvasOverlay;
 // waveform drawer is for drawing the waveform in the canvas
 // trimbars drawer is for drawing the trim bars in the overlay canvas
 
 let waveformDrawer, trimbarsDrawer;
-let mousePos = { x: 0, y: 0 }
-// The button for playing the sound
-let playButton = document.querySelector("#playButton");
-// disable the button until the sound is loaded and decoded
-playButton.disabled = true;
+let mousePos = { x: 0, y: 0 };
+let currentSound = null;
+let currentSoundDuration = 0;
 
-window.onload = async function init() {
-    ctx = new AudioContext();
+window.onload = async function () {
+  canvas = document.querySelector("#myCanvas");
+  canvasOverlay = document.querySelector("#myCanvasOverlay");
+  const div = document.getElementById("playButtonDiv");
 
-    // two canvas : one for drawing the waveform, the other for the trim bars
-    canvas = document.querySelector("#myCanvas");
-    canvasOverlay = document.querySelector("#myCanvasOverlay");
+  waveformDrawer = new WaveformDrawer();
+  
+  // Initialize trim bars at extreme positions (left = 0, right = canvas width)
+  trimbarsDrawer = new TrimbarsDrawer(canvasOverlay, 0, canvas.width);
 
-    // create the waveform drawer and the trimbars drawer
-    waveformDrawer = new WaveformDrawer();
-    trimbarsDrawer = new TrimbarsDrawer(canvasOverlay, 100, 200);
+  // Load and decode all sounds
+  const decodedSounds = await Promise.all(
+    soundURLs.map(url => loadAndDecodeSound(url, ctx))
+  );
 
-    // load and decode the sound
-    // this is asynchronous, we use await to wait for the end of the loading and decoding
-    // before going to the next instruction
-    // Note that we cannot use await outside an async function
-    // so we had to declare the init function as async
-    decodedSound = await loadAndDecodeSound(soundURL, ctx);
-    waveformDrawer.init(decodedSound, canvas, '#83E83E');
-    waveformDrawer.drawWave(0, canvas.height);
+  // Create a button per sound
+  decodedSounds.forEach((buffer, index) => {
+    const button = document.createElement('button');
+    button.textContent = `Sound ${index + 1}`;
 
-    // we enable the play sound button, now that the sound is loaded and decoded
-    playButton.disabled = false;
+    button.onclick = async () => {
+      if (ctx.state === "suspended") await ctx.resume();
 
-    // Event listener for the button. When the button is pressed, we play the sound
-    playButton.onclick = function (evt) {
-        // get start and end time (in seconds) from trim bars position.x (in pixels)
-        let start = pixelToSeconds(trimbarsDrawer.leftTrimBar.x, decodedSound.duration, canvas.width);
-        let end = pixelToSeconds(trimbarsDrawer.rightTrimBar.x, decodedSound.duration, canvas.width);
-        console.log("start: " + start + " end: " + end);
-        // from utils.js
-        playSound(ctx, decodedSound, start, end);
+      // Set current sound
+      currentSound = buffer;
+      currentSoundDuration = buffer.duration;
+
+      // Clear canvas before drawing
+      canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw waveform
+      waveformDrawer.init(buffer, canvas, '#83E83E');
+      waveformDrawer.drawWave(0, canvas.height);
+
+      // Get trim start/end and play sound
+      const start = pixelToSeconds(trimbarsDrawer.leftTrimBar.x, currentSoundDuration, canvas.width);
+      const end = pixelToSeconds(trimbarsDrawer.rightTrimBar.x, currentSoundDuration, canvas.width);
+      playSound(ctx, currentSound, start, end);
     };
 
+    div.appendChild(button);
+  });
 
-    // declare mouse event listeners for ajusting the trim bars
-    // when the mouse moves, we check if we are close to a trim bar
-    // if so: highlight it!
-    // if a trim bar is selected and the mouse moves, we move the trim bar
-    // when the mouse is pressed, we start dragging the selected trim bar (if any)
-    // when the mouse is released, we stop dragging the trim bar (if any)
-    canvasOverlay.onmousemove = (evt) => {
-        // get the mouse position in the canvas
-        let rect = canvas.getBoundingClientRect();
+  // Trim bar mouse handling
+  canvasOverlay.onmousemove = (evt) => {
+    const rect = canvasOverlay.getBoundingClientRect();
+    mousePos.x = evt.clientX - rect.left;
+    mousePos.y = evt.clientY - rect.top;
+    trimbarsDrawer.moveTrimBars(mousePos);
+  };
 
-        mousePos.x = (evt.clientX - rect.left);
-        mousePos.y = (evt.clientY - rect.top);
+  canvasOverlay.onmousedown = () => trimbarsDrawer.startDrag();
+  canvasOverlay.onmouseup = () => trimbarsDrawer.stopDrag();
 
-        // When the mouse moves, we check if we are close to a trim bar
-        // if so: move it!
-        trimbarsDrawer.moveTrimBars(mousePos);
-    }
-
-    canvasOverlay.onmousedown = (evt) => {
-        // If a trim bar is close to the mouse position, we start dragging it
-        trimbarsDrawer.startDrag();
-    }
-
-    canvasOverlay.onmouseup = (evt) => {
-        // We stop dragging the trim bars (if they were being dragged)
-        trimbarsDrawer.stopDrag();
-    }
-
-    // start the animation loop for drawing the trim bars
-    requestAnimationFrame(animate);
+  requestAnimationFrame(animate);
 };
 
 // Animation loop for drawing the trim bars
